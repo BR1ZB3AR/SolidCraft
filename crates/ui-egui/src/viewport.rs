@@ -2203,7 +2203,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     // Hover (pre-highlight).
     match hover {
         // Body selection: the whole body lights up.
-        Some(Hit::Face { body, .. }) if app.ui.pick_bodies && app.dialog.is_none() && app.tool.is_none() => {
+        Some(Hit::Face { body, .. }) if (app.ui.pick_bodies && app.dialog.is_none() && app.tool.is_none()) || body_only_input_active(app) => {
             if let Some(b) = st.body(body) {
                 let k = t.hover_face_lift;
                 let c = body_rgb(app, body);
@@ -3449,6 +3449,18 @@ fn grid_centre(tf: Vec3, back: Vec3, n: Vec3, ext: f64) -> Vec3 {
 }
 
 /// Hover feedback for the active sketch's points and curves (drawn on top of everything).
+/// Whether the open dialog is waiting on an input that takes whole bodies and nothing finer
+/// (Bodies to Join, Combine's Target Body, Mirror's Objects). A face hovered for such an input
+/// can only mean its body, so the whole body lights up rather than the one face under the
+/// pointer. An input that also takes faces or edges keeps its finer feedback.
+pub(crate) fn body_only_input_active(app: &SolveApp) -> bool {
+    use crate::selection::{BODIES, EDGES, FACES, PLANAR_FACES, VERTICES};
+    app.dialog
+        .as_ref()
+        .and_then(|d| d.active_input())
+        .is_some_and(|i| i.accept & BODIES != 0 && i.accept & (FACES | PLANAR_FACES | EDGES | VERTICES) == 0)
+}
+
 fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let col = Tokens::get().hover_profile_edge;
     let st = crate::open_meshing::shown_world(app);
