@@ -139,6 +139,8 @@ mod expression_complete;
 #[cfg(test)]
 mod extrude_edit_tests;
 mod extrude_preview;
+#[cfg(test)]
+mod extrude_scope_tests;
 mod file_load;
 mod file_picker;
 pub(crate) mod frame_watch;
