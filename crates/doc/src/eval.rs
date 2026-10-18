@@ -3364,7 +3364,11 @@ fn feature_tools_with_constructor(
                         st.bodies
                             .iter()
                             .filter(|b| targets.is_empty() || targets.iter().any(|t| *t == b.name))
-                            .any(|b| kernel::can_join_touching_faces(&b.body, &tool.body))
+                            // `can_join_touching_faces` needs a sewable planar seam and one
+                            // boundary each. A face-to-face contact is enough to keep the exact
+                            // tool: extending into the body buries it, and the sides then meet
+                            // on coincident curved surfaces no fallback handles.
+                            .any(|b| kernel::can_join_touching_faces(&b.body, &tool.body) || kernel::faces_touch(&b.body, &tool.body))
                     }) {
                         // Preserve a whole touching face: extending into a chamfer replaces
                         // the sewable seam with a coincident curved intersection.
