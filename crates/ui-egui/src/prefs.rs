@@ -1424,8 +1424,8 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         PAGE_GRAPHICS => {
             ui_kit::row(ui, app.tr("ui.graphics_preset"), |ui| graphics_preset_selector(app, ui));
             ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
-                let mut selected = usize::from(app.ui.visual_style.min(3));
-                ui_kit::dropdown(ui, "pref_style", &mut selected, &["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges"]);
+                let mut selected = usize::from(app.ui.visual_style.min(crate::viewport::LAST_VISUAL_STYLE));
+                ui_kit::dropdown(ui, "pref_style", &mut selected, &crate::viewport::VISUAL_STYLES);
                 app.ui.visual_style = selected as u8;
             });
             ui_kit::checkbox(ui, crate::i18n::tr_label("Grid"), &mut app.ui.show_grid);
