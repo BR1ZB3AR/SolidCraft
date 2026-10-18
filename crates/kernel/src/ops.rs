@@ -175,6 +175,13 @@ pub fn can_join_touching_faces(a: &Body, b: &Body) -> bool {
     a.solid.boundaries().len() == 1 && b.solid.boundaries().len() == 1 && crate::coplanar::glue(a, b).is_some_and(|r| r.is_ok())
 }
 
+/// Whether the bodies meet face to face over an area, back to back on a common plane. This is
+/// the contact the exact union routes need, and it holds for contacts `can_join_touching_faces`
+/// turns down, including a hollow target, or sides that meet on coincident curved surfaces.
+pub fn faces_touch(a: &Body, b: &Body) -> bool {
+    crate::coplanar::faces_touch(a, b)
+}
+
 /// Check all separated extrusion starts in one construction, without rebuilding
 /// the unchanged target once for each face. Partial seams keep the ordinary path.
 pub fn can_join_all_touching_faces(a: &Body, b: &Body) -> bool {
