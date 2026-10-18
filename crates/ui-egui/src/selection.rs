@@ -46,12 +46,22 @@ pub struct SelInput {
     pub accept: Accept,
     /// Many items (clicks toggle them), or one (a click replaces it).
     pub multi: bool,
+    /// Whether what is already selected may fill this input as the dialog opens.
+    pub preselect: bool,
     pub items: Vec<Sel>,
 }
 
 impl SelInput {
     pub fn new(label: &'static str, accept: Accept, multi: bool) -> SelInput {
-        SelInput { label, accept, multi, items: Vec::new() }
+        SelInput { label, accept, multi, preselect: true, items: Vec::new() }
+    }
+
+    /// An input the pre-selection leaves alone: the user picks it deliberately. An extrude's
+    /// scope takes bodies, and without this a face picked to extrude from would be turned into
+    /// its body and land there instead of in Profiles.
+    pub fn no_preselect(mut self) -> SelInput {
+        self.preselect = false;
+        self
     }
 
     /// The selection a hit stands for, if this input accepts it.
