@@ -635,6 +635,7 @@ fn build_scene(app: &SolveApp) -> GpuScene {
     let (shaded, edges) = match app.ui.visual_style {
         1 => (true, false),
         2 => (false, true),
+        // Translucent keeps its edges: they are what reads the shape through the faces.
         _ => (true, true),
     };
     let edge_col = if shaded { c4(tk.body_edge) } else { c4(tk.text) };
@@ -654,7 +655,8 @@ fn build_scene(app: &SolveApp) -> GpuScene {
         let base = body_color(&s.doc, b).unwrap_or(tk.body);
         let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
         // Appearances: the body's opacity, and faces with looks of their own.
-        let opacity = s.doc.model_body_opacity(b);
+        let opacity =
+            if app.ui.visual_style == TRANSLUCENT { TRANSLUCENT_OPACITY.min(s.doc.model_body_opacity(b)) } else { s.doc.model_body_opacity(b) };
         let face_looks: std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look> =
             if shaded { s.doc.face_colors(b).into_iter().collect() } else { Default::default() };
         let opaque = !faded && opacity >= 0.999 && face_looks.values().all(|l| l.opacity >= 0.999);
@@ -2413,7 +2415,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             analysis: analysis_uniform(app),
             analysis_colors: crate::gpu::analysis_colors(&t.analysis),
             access: crate::access::map(app),
-            outline: matches!(app.ui.visual_style, 0 | 3),
+            outline: matches!(app.ui.visual_style, 0 | 3 | 4),
             eye: {
                 let e = proj.cam.eye().to_f32();
                 [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }]
@@ -3428,6 +3430,15 @@ pub fn look_at_selection(app: &mut SolveApp) {
     }
 }
 
+/// The visual styles, in the order `UiState::visual_style` numbers them. Shown in the
+/// navigation bar's style menu and in Preferences.
+pub const VISUAL_STYLES: [&str; 5] = ["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges", "Translucent"];
+/// The last valid `UiState::visual_style`.
+pub const LAST_VISUAL_STYLE: u8 = VISUAL_STYLES.len() as u8 - 1;
+/// Translucent: every body is drawn see-through, whatever its appearance says.
+pub(crate) const TRANSLUCENT: u8 = 4;
+const TRANSLUCENT_OPACITY: f64 = 0.35;
+
 fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if app.viewport.layout.as_ref().is_some_and(|l| !l.navigation.is_positive()) {
         return;
@@ -3451,11 +3462,13 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         ("lookat", "Look At the selected face or plane (or the active sketch)"),
         ("home", "Home view"),
         ("perspective", "Perspective / orthographic"),
-        ("style", "Visual style: shaded with edges, shaded, wireframe, shaded with hidden edges"),
+        ("style", "Visual style: shaded with edges, shaded, wireframe, shaded with hidden edges, translucent"),
         ("settings", "View settings: grid, ground shadow, agent cursor"),
     ];
     let menu_id = ui.id().with("nav_view_menu");
     let mut menu_open = ui.data(|d| d.get_temp::<bool>(menu_id)).unwrap_or(false);
+    let style_id = ui.id().with("nav_style_menu");
+    let mut style_open = ui.data(|d| d.get_temp::<bool>(style_id)).unwrap_or(false);
     let w = items.len() as f32 * 30.0 + 10.0;
     let bar = app
         .viewport
@@ -3470,7 +3483,8 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         || app.viewport.nav.is_some()
         || app.viewport.modifier_nav.is_some()
         || app.viewport.spin
-        || menu_open;
+        || menu_open
+        || style_open;
     let mut painter = ui.painter_at(rect);
     painter.set_opacity(if active || app.preferences.navigator_style == crate::prefs::NavigatorStyle::Axes { 1.0 } else { 0.45 });
     painter.rect(bar, 6.0, t.overlay, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
@@ -3487,6 +3501,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             "zoom" => app.viewport.nav == Some(NavMode::Zoom),
             "perspective" => app.ui.perspective,
             "settings" => menu_open,
+            "style" => style_open,
             "spin" => app.viewport.spin,
             _ => false,
         };
@@ -3507,7 +3522,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 }
                 "home" => app.animate_view("home"),
                 "lookat" => look_at_selection(app),
-                "style" => app.ui.visual_style = (app.ui.visual_style + 1) % 4,
+                "style" => style_open = !style_open,
                 "perspective" => app.ui.perspective = !app.ui.perspective,
                 _ => menu_open = !menu_open,
             }
@@ -3518,8 +3533,37 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 menu_open = view_menu(app, ui, br);
             }
         }
+        if *icon == "style" {
+            crate::scenario::publish_handle("nav:style", br.center());
+            if style_open {
+                style_open = style_menu(app, ui, br);
+            }
+        }
     }
     ui.data_mut(|d| d.insert_temp(menu_id, menu_open));
+    ui.data_mut(|d| d.insert_temp(style_id, style_open));
+}
+
+/// The visual styles above the navigation bar's style button, so a style is picked rather than
+/// cycled to. False once it should close (a click outside it).
+fn style_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
+    let area = crate::frame::area(egui::Id::new("sc_style_menu"))
+        .order(egui::Order::Foreground)
+        .pivot(Align2::RIGHT_BOTTOM)
+        .fixed_pos(button.right_top() - vec2(0.0, 6.0));
+    let r = area.show(ui.ctx(), |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_width(220.0);
+            ui.label(egui::RichText::new(crate::i18n::tr_label("DISPLAY")).strong().size(11.5));
+            for (i, style) in VISUAL_STYLES.iter().enumerate() {
+                let picked = ui.selectable_value(&mut app.ui.visual_style, i as u8, crate::i18n::tr_label(style));
+                crate::scenario::publish_handle(&format!("nav:style:{style}"), picked.rect.center());
+            }
+        });
+    });
+    let clicked_out = ui.input(|i| i.pointer.any_pressed())
+        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !r.response.rect.contains(p) && !button.contains(p));
+    !clicked_out
 }
 
 /// The View settings above the navigation bar's last button: grid, ground shadow and the agent

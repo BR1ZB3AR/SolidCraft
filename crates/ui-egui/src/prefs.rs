@@ -1349,8 +1349,8 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         }
         4 => {
             ui.label(crate::i18n::tr_label("Visual style"));
-            let styles = ["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges"];
-            let selected_label = crate::i18n::tr_label(styles[usize::from(app.ui.visual_style.min(3))]);
+            let styles = crate::viewport::VISUAL_STYLES;
+            let selected_label = crate::i18n::tr_label(styles[usize::from(app.ui.visual_style.min(crate::viewport::LAST_VISUAL_STYLE))]);
             egui::ComboBox::from_id_salt("pref_style").selected_text(selected_label).show_ui(ui, |ui| {
                 for (i, s) in styles.iter().enumerate() {
                     ui.selectable_value(&mut app.ui.visual_style, i as u8, crate::i18n::tr_label(s));
