@@ -147,3 +147,30 @@ fn a_body_can_be_picked_into_the_scope() {
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands.first().unwrap().1["targets"], json!(["Right"]));
 }
+
+/// Hovering for a body-only input lights the whole body, not the one face under the pointer.
+#[test]
+fn the_scope_input_hovers_whole_bodies() {
+    let mut h = crate::scenario::Harness::new();
+    let sketch = two_bars(&mut h);
+    h.app.start("solid.extrude");
+    h.frames(3);
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    h.frames(3);
+    h.app.dialog.as_mut().unwrap().active = 0;
+    h.frames(1);
+    assert!(!crate::viewport::body_only_input_active(&h.app), "Profiles takes profiles and faces, so hover stays fine-grained");
+    h.step(&json!({"widget": "↖ Select", "near": JOIN})).unwrap();
+    h.frames(2);
+    assert!(crate::viewport::body_only_input_active(&h.app), "the scope takes whole bodies only");
+}
+
+/// Combine's body inputs get the same whole-body hover.
+#[test]
+fn combines_body_inputs_hover_whole_bodies_too() {
+    let mut h = crate::scenario::Harness::new();
+    two_bars(&mut h);
+    h.app.start("solid.combine");
+    h.frames(3);
+    assert!(crate::viewport::body_only_input_active(&h.app), "Target Body takes whole bodies");
+}
