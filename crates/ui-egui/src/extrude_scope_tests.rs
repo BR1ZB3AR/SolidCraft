@@ -127,3 +127,23 @@ fn editing_a_scoped_extrude_round_trips_its_targets() {
     assert_eq!(command, "timeline.redefine");
     assert_eq!(params["params"]["targets"], json!(["Right"]));
 }
+
+/// End to end: click the row, then click a body in the viewport, and it is the scope.
+#[test]
+fn a_body_can_be_picked_into_the_scope() {
+    let mut h = crate::scenario::Harness::new();
+    let sketch = two_bars(&mut h);
+    h.app.start("solid.extrude");
+    h.frames(3);
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    h.frames(3);
+    h.step(&json!({"widget": "↖ Select", "near": JOIN})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": {"world": [40.0, 10.0, 10.0]}})).unwrap();
+    h.frames(3);
+    let picked: Vec<String> =
+        scope_row(&h, JOIN).items.iter().map(|x| if let Sel::Body { name } = x { name.clone() } else { String::new() }).collect();
+    assert_eq!(picked, vec!["Right".to_string()], "clicking the right bar scopes the join to it");
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands.first().unwrap().1["targets"], json!(["Right"]));
+}
