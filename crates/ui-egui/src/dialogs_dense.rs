@@ -268,6 +268,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     *auto_op = false;
                 }
             });
+            // New Body merges into nothing, so the scope goes away with it. Syncing every
+            // frame also follows the operation auto_operation picks.
+            let picked = *operation;
+            crate::dialogs::set_scope(&mut d.inputs, &mut d.active, picked);
             ui_kit::section(ui, "extrude_options", "Options", true, |ui| {
                 let was_thin = *thin;
                 let was_direction = *direction;

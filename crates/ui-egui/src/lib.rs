@@ -138,6 +138,8 @@ mod expression_complete;
 #[cfg(test)]
 mod extrude_edit_tests;
 mod extrude_preview;
+#[cfg(test)]
+mod extrude_scope_tests;
 mod file_load;
 mod file_picker;
 pub(crate) mod frame_watch;
@@ -242,6 +244,8 @@ mod ui_kit_guard_tests;
 pub mod update;
 pub mod viewport;
 mod viewport_layout;
+#[cfg(test)]
+mod visual_style_tests;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -700,7 +704,7 @@ impl SolveApp {
             self.autosave_minutes = m.clamp(0.0, 600.0);
         }
         if let Some(s) = v.get("visual_style").and_then(Value::as_u64) {
-            self.ui.visual_style = u8::try_from(s.min(3)).unwrap_or(0);
+            self.ui.visual_style = u8::try_from(s.min(u64::from(viewport::LAST_VISUAL_STYLE))).unwrap_or(0);
         }
         // Browser folders the user opened or closed.
         let keys = |k: &str| -> std::collections::BTreeSet<String> {

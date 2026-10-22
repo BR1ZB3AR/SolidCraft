@@ -683,7 +683,8 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         let base = body_color(&s.doc, b).unwrap_or(tk.body);
         let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
         // Appearances: the body's opacity, and faces with looks of their own.
-        let opacity = s.doc.model_body_opacity(b);
+        let opacity =
+            if app.ui.visual_style == TRANSLUCENT { TRANSLUCENT_OPACITY.min(s.doc.model_body_opacity(b)) } else { s.doc.model_body_opacity(b) };
         let face_looks: std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look> =
             if shaded { s.doc.face_colors(b).into_iter().collect() } else { Default::default() };
         let opaque = !faded && opacity >= 0.999 && face_looks.values().all(|l| l.opacity >= 0.999);
@@ -2204,7 +2205,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     // Hover (pre-highlight).
     match hover {
         // Body selection: the whole body lights up.
-        Some(Hit::Face { body, .. }) if app.ui.pick_bodies && app.dialog.is_none() && app.tool.is_none() => {
+        Some(Hit::Face { body, .. }) if (app.ui.pick_bodies && app.dialog.is_none() && app.tool.is_none()) || body_only_input_active(app) => {
             if let Some(b) = st.body(body) {
                 let k = t.hover_face_lift;
                 let c = body_rgb(app, body);
@@ -2514,7 +2515,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             analysis: analysis_uniform(app),
             analysis_colors: crate::gpu::analysis_colors(&t.analysis),
             access: crate::access::map(app),
-            outline: matches!(app.ui.visual_style, 0 | 3),
+            outline: matches!(app.ui.visual_style, 0 | 3 | 4),
             ao_radius: if app.preferences.ambient_occlusion && app.ui.visual_style != 2 {
                 (model_bounds(app).diagonal() * 0.04).clamp(1e-4, 1e6) as f32
             } else {
@@ -3451,6 +3452,18 @@ fn grid_centre(tf: Vec3, back: Vec3, n: Vec3, ext: f64) -> Vec3 {
 }
 
 /// Hover feedback for the active sketch's points and curves (drawn on top of everything).
+/// Whether the open dialog is waiting on an input that takes whole bodies and nothing finer
+/// (Bodies to Join, Combine's Target Body, Mirror's Objects). A face hovered for such an input
+/// can only mean its body, so the whole body lights up rather than the one face under the
+/// pointer. An input that also takes faces or edges keeps its finer feedback.
+pub(crate) fn body_only_input_active(app: &SolveApp) -> bool {
+    use crate::selection::{BODIES, EDGES, FACES, PLANAR_FACES, VERTICES};
+    app.dialog
+        .as_ref()
+        .and_then(|d| d.active_input())
+        .is_some_and(|i| i.accept & BODIES != 0 && i.accept & (FACES | PLANAR_FACES | EDGES | VERTICES) == 0)
+}
+
 fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let col = Tokens::get().hover_profile_edge;
     let st = crate::open_meshing::shown_world(app);
@@ -3822,6 +3835,15 @@ pub fn look_at_selection(app: &mut SolveApp) {
     }
 }
 
+/// The visual styles, in the order `UiState::visual_style` numbers them. Shown in the
+/// navigation bar's style menu and in Preferences.
+pub const VISUAL_STYLES: [&str; 5] = ["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges", "Translucent"];
+/// The last valid `UiState::visual_style`.
+pub const LAST_VISUAL_STYLE: u8 = VISUAL_STYLES.len() as u8 - 1;
+/// Translucent: every body is drawn see-through, whatever its appearance says.
+pub(crate) const TRANSLUCENT: u8 = 4;
+const TRANSLUCENT_OPACITY: f64 = 0.35;
+
 fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if app.viewport.layout.as_ref().is_some_and(|l| !l.navigation.is_positive()) {
         return;
@@ -3847,10 +3869,12 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         ("lookat", "Look At the selected face or plane (or the active sketch)"),
         ("home", "Home view"),
         ("perspective", "Perspective / orthographic"),
-        ("style", "Visual style: shaded with edges, shaded, wireframe, shaded with hidden edges"),
+        ("style", "Visual style: shaded with edges, shaded, wireframe, shaded with hidden edges, translucent"),
         ("settings", "View settings: grid, ground shadow, ambient occlusion, agent cursor"),
     ];
     let menu_id = ui.id().with("nav_view_menu");
+    let style_id = ui.id().with("nav_style_menu");
+    let mut style_open = ui.data(|d| d.get_temp::<bool>(style_id)).unwrap_or(false);
     let mut menu_open = ui.data(|d| d.get_temp::<bool>(menu_id)).unwrap_or(false);
     let w = items.len() as f32 * 30.0 + 10.0;
     let bar = app
@@ -3904,7 +3928,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 }
                 "home" => app.animate_view("home"),
                 "lookat" => look_at_selection(app),
-                "style" => app.ui.visual_style = (app.ui.visual_style + 1) % 4,
+                "style" => style_open = !style_open,
                 "perspective" => app.ui.perspective = !app.ui.perspective,
                 _ => menu_open = !menu_open,
             }
@@ -3915,8 +3939,15 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 menu_open = view_menu(app, ui, br);
             }
         }
+        if *icon == "style" {
+            crate::scenario::publish_handle("nav:style", br.center());
+            if style_open {
+                style_open = style_menu(app, ui, br);
+            }
+        }
     }
     ui.data_mut(|d| d.insert_temp(menu_id, menu_open));
+    ui.data_mut(|d| d.insert_temp(style_id, style_open));
 }
 
 /// The View settings above the navigation bar's last button: grid, ground shadow and the agent
@@ -3966,6 +3997,36 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
     });
     let clicked_out = !child_popup_open
         && ui.input(|i| i.pointer.any_pressed())
+        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !r.response.rect.contains(p) && !button.contains(p));
+    !clicked_out
+}
+
+/// The visual styles above the navigation bar's style button, so a style is picked rather than
+/// cycled to. False once it should close (a click outside it).
+fn style_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
+    let t = crate::theme::Tokens::get();
+    let area = Container::new(ui.ctx(), Surface::Popup)
+        .area(egui::Id::new("sc_style_menu"))
+        .order(egui::Order::Foreground)
+        .pivot(Align2::RIGHT_BOTTOM)
+        .fixed_pos(button.right_top() - vec2(0.0, 6.0));
+    let r = area.show(ui.ctx(), |ui| {
+        Container::popup_frame(ui.style()).show(ui, |ui| {
+            ui.set_width(220.0);
+            ui.label(egui::RichText::new(crate::i18n::tr_label("DISPLAY")).semibold().color(t.text).size(t.font_caption));
+            for (i, style) in VISUAL_STYLES.iter().enumerate() {
+                let current = app.ui.visual_style == i as u8;
+                // The style in use is its own row, shown as unavailable rather than marked:
+                // the check glyph belongs to checkboxes.
+                let picked = crate::ui_kit::button(ui, crate::i18n::tr_label(style), crate::ui_kit::Button::Enabled(!current));
+                crate::scenario::publish_handle(&format!("nav:style:{style}"), picked.rect.center());
+                if picked.clicked() {
+                    app.ui.visual_style = i as u8;
+                }
+            }
+        });
+    });
+    let clicked_out = ui.input(|i| i.pointer.any_pressed())
         && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !r.response.rect.contains(p) && !button.contains(p));
     !clicked_out
 }

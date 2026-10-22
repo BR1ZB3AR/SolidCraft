@@ -595,7 +595,14 @@ impl Dialog {
                     wall_side: 0,
                     wall2: "1 mm".into(),
                 },
-                vec![SelInput::new("Profiles", EXTRUDE_ACCEPT, true)],
+                {
+                    // The operation defaults to Join exactly when bodies exist.
+                    let mut inputs = vec![SelInput::new("Profiles", EXTRUDE_ACCEPT, true)];
+                    if has_bodies {
+                        inputs.push(scope_input(1));
+                    }
+                    inputs
+                },
             ),
             "solid.revolve" => Dialog::new(
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
@@ -782,7 +789,7 @@ impl Dialog {
                 _ => None,
             };
             if let Some(b) = as_body
-                && let Some(inp) = d.inputs.iter_mut().find(|i| i.accept == BODIES && (i.multi || i.items.is_empty()))
+                && let Some(inp) = d.inputs.iter_mut().find(|i| i.accept == BODIES && i.preselect && (i.multi || i.items.is_empty()))
             {
                 if !inp.items.contains(&b) {
                     inp.items.push(b);
@@ -795,7 +802,10 @@ impl Dialog {
                 _ => true,
             };
             let takes = |i: &SelInput| {
-                fits(i.accept, sel) && (i.multi || i.items.is_empty()) && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
+                i.preselect
+                    && fits(i.accept, sel)
+                    && (i.multi || i.items.is_empty())
+                    && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
             };
             if let Some(inp) = d.inputs.iter_mut().find(|i| takes(i)) {
                 if matches!(d.kind, Kind::Fillet { .. }) {
@@ -2584,6 +2594,45 @@ pub(crate) fn roll_marker(app: &mut SolveApp, marker: Option<usize>) -> Result<(
 /// The pick input an extent of To Object adds (a face, vertex or point to go to).
 const TO_OBJECT: &str = "To Object";
 const FROM_OBJECT: &str = "From Object";
+/// The bodies a Join, Cut or Intersect acts on, named for the operation that owns them and
+/// indexed by it. A New Body acts on nothing, so it has no scope and no label.
+const SCOPE_LABELS: [&str; 4] = ["", "Bodies to Join", "Objects to Cut", "Bodies to Intersect"];
+
+fn scope_label(operation: usize) -> &'static str {
+    SCOPE_LABELS.get(operation).copied().unwrap_or("")
+}
+
+pub(crate) fn is_scope(label: &str) -> bool {
+    !label.is_empty() && SCOPE_LABELS[1..].contains(&label)
+}
+
+/// The scope input for an operation; empty means every solid takes part, as before.
+pub(crate) fn scope_input(operation: usize) -> SelInput {
+    SelInput::new(scope_label(operation), BODIES, true).no_preselect()
+}
+
+/// Add, rename or drop the scope input as the operation changes, keeping what is picked.
+/// Unlike To Object it does not steal the active input: the profiles are what the user is
+/// usually picking.
+pub(crate) fn set_scope(inputs: &mut Vec<SelInput>, active: &mut usize, operation: usize) {
+    let label = scope_label(operation);
+    if label.is_empty() {
+        if inputs.iter().any(|i| is_scope(i.label)) {
+            inputs.retain(|i| !is_scope(i.label));
+            *active = (*active).min(inputs.len().saturating_sub(1));
+        }
+    } else if let Some(inp) = inputs.iter_mut().find(|i| is_scope(i.label)) {
+        inp.label = label;
+    } else {
+        inputs.push(scope_input(operation));
+    }
+}
+
+/// The bodies picked as the scope, for a command's `targets`.
+fn scope_bodies(d: &Dialog) -> Vec<String> {
+    let Some(inp) = d.inputs.iter().find(|i| is_scope(i.label)) else { return Vec::new() };
+    inp.items.iter().filter_map(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None }).collect()
+}
 
 fn object_on(inputs: &[SelInput], label: &str) -> bool {
     inputs.iter().any(|i| i.label == label)
@@ -3077,6 +3126,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             if object_on(&d.inputs, FROM_OBJECT) {
                 common["from"] = object_point(&d.inputs, FROM_OBJECT).ok_or("select the object to extrude from")?;
+            }
+            let scope = scope_bodies(d);
+            if !scope.is_empty() {
+                common["targets"] = json!(scope);
             }
             let with = |extra: Value| -> Value {
                 let mut p = common.clone();
@@ -4170,8 +4223,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
                 }
             }
+            // The scope shows in the picker, so it can be widened or cleared; stashing it in
+            // `extra` instead would reinstate it behind a user who emptied the row.
             if !targets.is_empty() {
-                d.extra.insert("targets".into(), json!(targets));
+                set_scope(&mut d.inputs, &mut d.active, op_index(operation));
+                if let Some(inp) = d.inputs.iter_mut().find(|i| is_scope(i.label)) {
+                    inp.items = targets.iter().map(|name| Sel::Body { name: name.to_string() }).collect();
+                }
             }
             d
         }
