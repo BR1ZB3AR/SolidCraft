@@ -4154,13 +4154,14 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
 /// The visual styles above the navigation bar's style button, so a style is picked rather than
 /// cycled to. False once it should close (a click outside it).
 fn style_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
-    let area = crate::frame::area(egui::Id::new("sc_style_menu"))
+    let t = crate::theme::Tokens::get();
+    let area = Container::new(ui.ctx(), Surface::Popup)
+        .area(egui::Id::new("sc_style_menu"))
         .order(egui::Order::Foreground)
         .pivot(Align2::RIGHT_BOTTOM)
         .fixed_pos(button.right_top() - vec2(0.0, 6.0));
-    let t = crate::theme::Tokens::get();
     let r = area.show(ui.ctx(), |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
+        Container::popup_frame(ui.style()).show(ui, |ui| {
             ui.set_width(220.0);
             ui.label(egui::RichText::new(crate::i18n::tr_label("DISPLAY")).semibold().color(t.text).size(t.font_caption));
             for (i, style) in VISUAL_STYLES.iter().enumerate() {
