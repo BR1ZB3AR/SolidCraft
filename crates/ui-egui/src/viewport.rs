@@ -4146,13 +4146,18 @@ fn style_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
         .order(egui::Order::Foreground)
         .pivot(Align2::RIGHT_BOTTOM)
         .fixed_pos(button.right_top() - vec2(0.0, 6.0));
+    let t = crate::theme::Tokens::get();
     let r = area.show(ui.ctx(), |ui| {
         egui::Frame::popup(ui.style()).show(ui, |ui| {
             ui.set_width(220.0);
-            ui.label(egui::RichText::new(crate::i18n::tr_label("DISPLAY")).strong().size(11.5));
+            ui.label(egui::RichText::new(crate::i18n::tr_label("DISPLAY")).semibold().color(t.text).size(t.font_caption));
             for (i, style) in VISUAL_STYLES.iter().enumerate() {
-                let picked = ui.selectable_value(&mut app.ui.visual_style, i as u8, crate::i18n::tr_label(style));
+                let value = i as u8;
+                let picked = crate::ui_kit::list_picker(ui, style, crate::i18n::tr_label(style), app.ui.visual_style == value);
                 crate::scenario::publish_handle(&format!("nav:style:{style}"), picked.rect.center());
+                if picked.clicked() {
+                    app.ui.visual_style = value;
+                }
             }
         });
     });
