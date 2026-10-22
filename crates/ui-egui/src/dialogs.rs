@@ -1974,6 +1974,9 @@ fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, range: std::
                     });
                 }
                 let chip_rect = chip.rect;
+                // The chip carries its row's label, as the clear button beside it does: the
+                // text it shows ("Select", "2 selected") is not addressable on its own.
+                crate::scenario::publish_handle(&format!("dialog:selection:{}", inp.label), chip_rect.center());
                 let tooltip = if let Some(reference) = stored_reference {
                     reference.to_string()
                 } else if custom_axis {
@@ -2282,8 +2285,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     auto_operation(app, &mut d);
     // New Body merges into nothing, so the scope goes away with it. Syncing every frame
     // also follows the operation auto_operation picks.
-    if let Kind::Extrude { operation, .. } = &d.kind {
-        let operation = *operation;
+    let scope_operation = match &d.kind {
+        Kind::Extrude { operation, .. } | Kind::Revolve { operation, .. } => Some(*operation),
+        _ => None,
+    };
+    if let Some(operation) = scope_operation {
         set_scope(&mut d.inputs, &mut d.active, operation);
     }
     d.sync_thread(&app.session);
@@ -2636,7 +2642,8 @@ pub(crate) fn roll_marker(app: &mut SolveApp, marker: Option<usize>) -> Result<(
 const TO_OBJECT: &str = "To Object";
 const FROM_OBJECT: &str = "From Object";
 /// The bodies a Join, Cut or Intersect acts on, named for the operation that owns them and
-/// indexed by it. A New Body acts on nothing, so it has no scope and no label.
+/// indexed by it. A New Body acts on nothing, so it has no scope and no label. Extrude and
+/// Revolve both take one; an empty picker keeps the old behaviour of acting on every solid.
 const SCOPE_LABELS: [&str; 4] = ["", "Bodies to Join", "Objects to Cut", "Bodies to Intersect"];
 
 fn scope_label(operation: usize) -> &'static str {
@@ -3265,6 +3272,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 json!({"sketch": sketch, "profiles": idx, "axis": axis, "angle": angle, "operation": OPS.get(*operation).copied().unwrap_or("new")});
             if to_object_on(&d.inputs) {
                 p["to"] = to_object_point(&d.inputs).ok_or("select the object to turn to")?;
+            }
+            let scope = scope_bodies(d);
+            if !scope.is_empty() {
+                p["targets"] = json!(scope);
             }
             ("solid.revolve", p)
         }
@@ -4312,8 +4323,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = ax.into_iter().collect();
             }
+            // The scope shows in the picker, so it can be widened or cleared; stashing it in
+            // `extra` instead would reinstate it behind a user who emptied the row.
             if !targets.is_empty() {
-                d.extra.insert("targets".into(), json!(targets));
+                set_scope(&mut d.inputs, &mut d.active, op_index(operation));
+                if let Some(inp) = d.inputs.iter_mut().find(|i| is_scope(i.label)) {
+                    inp.items = targets.iter().map(|name| Sel::Body { name: name.to_string() }).collect();
+                }
             }
             d
         }

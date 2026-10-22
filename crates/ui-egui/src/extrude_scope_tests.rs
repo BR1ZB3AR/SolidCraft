@@ -1,5 +1,5 @@
-//! The bodies an extrude's Join, Cut or Intersect acts on. The engine has always taken
-//! `targets`; this is the picker that fills it, labelled for the operation that owns it.
+//! The bodies an extrude's or revolve's Join, Cut or Intersect acts on. The engine has always
+//! taken `targets`; this is the picker that fills it, labelled for the operation that owns it.
 
 use crate::dialogs::{Kind, apply_commands};
 use serde_json::json;
@@ -137,7 +137,7 @@ fn a_body_can_be_picked_into_the_scope() {
     h.frames(3);
     h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     h.frames(3);
-    h.step(&json!({"widget": "↖ Select", "near": JOIN})).unwrap();
+    h.step(&json!({"click": {"handle": format!("dialog:selection:{JOIN}")}})).unwrap();
     h.frames(2);
     h.step(&json!({"click": {"world": [40.0, 10.0, 10.0]}})).unwrap();
     h.frames(3);
@@ -160,7 +160,7 @@ fn the_scope_input_hovers_whole_bodies() {
     h.app.dialog.as_mut().unwrap().active = 0;
     h.frames(1);
     assert!(!crate::viewport::body_only_input_active(&h.app), "Profiles takes profiles and faces, so hover stays fine-grained");
-    h.step(&json!({"widget": "↖ Select", "near": JOIN})).unwrap();
+    h.step(&json!({"click": {"handle": format!("dialog:selection:{JOIN}")}})).unwrap();
     h.frames(2);
     assert!(crate::viewport::body_only_input_active(&h.app), "the scope takes whole bodies only");
 }
@@ -173,4 +173,72 @@ fn combines_body_inputs_hover_whole_bodies_too() {
     h.app.start("solid.combine");
     h.frames(3);
     assert!(crate::viewport::body_only_input_active(&h.app), "Target Body takes whole bodies");
+}
+
+/// A revolve is scoped the same way an extrude is: the engine has always taken `targets` on
+/// `solid.revolve`, so a Join merged into every solid it touched until the picker filled it.
+#[test]
+fn a_revolve_sends_the_bodies_it_is_scoped_to() {
+    let mut h = crate::scenario::Harness::new();
+    let sketch = two_bars(&mut h);
+    h.app.start("solid.revolve");
+    h.frames(3);
+    if let Kind::Revolve { operation, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+        *operation = 1;
+    }
+    h.frames(3);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    d.inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
+    let scope = d.inputs.iter_mut().find(|i| i.label == JOIN).expect("Join brings the scope row");
+    scope.items = vec![Sel::Body { name: "Right".into() }];
+    h.frames(3);
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let (command, params) = commands.first().unwrap();
+    assert_eq!(command, "solid.revolve");
+    assert_eq!(params["operation"], "join");
+    assert_eq!(params["targets"], json!(["Right"]));
+}
+
+/// A revolve opens on New Body, which merges into nothing: the row arrives with an operation
+/// that needs it, is renamed for that operation, and goes away again.
+#[test]
+fn a_revolves_scope_follows_its_operation() {
+    let mut h = crate::scenario::Harness::new();
+    two_bars(&mut h);
+    h.app.start("solid.revolve");
+    h.frames(3);
+    let labelled = |h: &crate::scenario::Harness, label: &str| h.app.dialog.as_ref().unwrap().inputs.iter().any(|i| i.label == label);
+    assert!(!labelled(&h, JOIN), "New Body acts on nothing, so it has no scope");
+    for (operation, label) in [(1, JOIN), (2, CUT)] {
+        if let Kind::Revolve { operation: op, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+            *op = operation;
+        }
+        h.frames(3);
+        assert!(labelled(&h, label), "the row is named for the operation that owns it");
+    }
+    if let Kind::Revolve { operation, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+        *operation = 0;
+    }
+    h.frames(3);
+    assert!(!labelled(&h, JOIN) && !labelled(&h, CUT), "back to New Body, the scope goes with it");
+}
+
+/// An empty picker keeps the old behaviour: every solid takes part.
+#[test]
+fn an_empty_revolve_scope_leaves_targets_out() {
+    let mut h = crate::scenario::Harness::new();
+    let sketch = two_bars(&mut h);
+    h.app.start("solid.revolve");
+    h.frames(3);
+    if let Kind::Revolve { operation, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+        *operation = 1;
+    }
+    h.frames(3);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    d.inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
+    h.frames(3);
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(commands.first().unwrap().1.get("targets").is_none(), "every solid takes part, as before");
 }
