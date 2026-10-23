@@ -334,6 +334,8 @@ pub struct BlockBytes {
     pub glass: Vec<u8>,
     pub lines: Vec<u8>,
     pub hidden: Vec<u8>,
+    /// Lines over everything, drawn after the glass (a see-through style's edges).
+    pub overlay: Vec<u8>,
 }
 
 impl GpuScene {
@@ -778,6 +780,7 @@ struct BlockGpu {
     trans: Option<Batch>,
     lines: Option<Batch>,
     hidden: Option<Batch>,
+    overlay: Option<Batch>,
 }
 
 /// The blocks' buffers, then the scene's own, as one batch (the blocks' buffers are shared,
@@ -849,6 +852,7 @@ impl Batches {
                         trans: upload(device, "sc_trans", &block.bytes.trans, TRI_SIZE),
                         lines: upload(device, "sc_lines", &block.bytes.lines, LINE_SIZE),
                         hidden: upload(device, "sc_hidden", &block.bytes.hidden, LINE_SIZE),
+                        overlay: upload(device, "sc_overlay", &block.bytes.overlay, LINE_SIZE),
                     },
                 };
                 self.blocks.insert(block.key, gpu);
@@ -866,7 +870,7 @@ impl Batches {
             self.glass_sorted_for = None;
             self.lines = joined(blocks.iter().map(|b| &b.lines), upload(device, "sc_lines", &sc.lines, LINE_SIZE));
             self.hidden = joined(blocks.iter().map(|b| &b.hidden), upload(device, "sc_hidden", &sc.hidden, LINE_SIZE));
-            self.overlays = upload(device, "sc_overlay", &sc.overlay, LINE_SIZE);
+            self.overlays = joined(blocks.iter().map(|b| &b.overlay), upload(device, "sc_overlay", &sc.overlay, LINE_SIZE));
             self.ghost = upload(device, "sc_ghost", &sc.ghost, TRI_SIZE);
             self.xray = upload(device, "sc_xray", &sc.xray, TRI_SIZE);
             self.under = upload(device, "sc_under", &sc.under, LINE_SIZE);
