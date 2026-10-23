@@ -633,7 +633,16 @@ impl BodyDraw {
         h.finish()
     }
 
-    fn build(&self, sc: &mut crate::gpu::BlockBytes, shaded: bool, edges: bool, hidden_edges: bool, on_top: bool, edge_col: [u8; 4], hidden_col: [u8; 4]) {
+    fn build(
+        &self,
+        sc: &mut crate::gpu::BlockBytes,
+        shaded: bool,
+        edges: bool,
+        hidden_edges: bool,
+        on_top: bool,
+        edge_col: [u8; 4],
+        hidden_col: [u8; 4],
+    ) {
         let m = &self.mesh;
         let mut out = GpuScene::default();
         for (ti, t) in m.triangles.iter().enumerate().filter(|_| shaded && !self.on_gpu) {
@@ -883,11 +892,15 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         if key.is_multiple_of(16) || run.len() >= 64 {
             let draws = std::mem::take(&mut run);
             let block_key = std::mem::replace(&mut run_key, std::collections::hash_map::DefaultHasher::new()).finish();
-            push_block(&mut sc, &mut kept, &mut made, block_key, draws, |d, out| d.build(out, shaded, edges, hidden_edges, edges_on_top, edge_col, hidden_col));
+            push_block(&mut sc, &mut kept, &mut made, block_key, draws, |d, out| {
+                d.build(out, shaded, edges, hidden_edges, edges_on_top, edge_col, hidden_col)
+            });
         }
     }
     if !run.is_empty() {
-        push_block(&mut sc, &mut kept, &mut made, run_key.finish(), run, |d, out| d.build(out, shaded, edges, hidden_edges, edges_on_top, edge_col, hidden_col));
+        push_block(&mut sc, &mut kept, &mut made, run_key.finish(), run, |d, out| {
+            d.build(out, shaded, edges, hidden_edges, edges_on_top, edge_col, hidden_col)
+        });
     }
     if let Ok(mut b) = app.viewport.blocks.lock() {
         *b = made;
