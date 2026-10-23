@@ -622,18 +622,18 @@ struct BodyDraw {
 
 impl BodyDraw {
     /// Everything [`BodyDraw::build`] reads.
-    fn key(&self, shaded: bool, edges: bool, hidden_edges: bool, edge_col: [u8; 4], hidden_col: [u8; 4]) -> u64 {
+    fn key(&self, shaded: bool, edges: bool, hidden_edges: bool, on_top: bool, edge_col: [u8; 4], hidden_col: [u8; 4]) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (std::sync::Arc::as_ptr(&self.mesh) as usize).hash(&mut h);
         self.place.iter().flatten().flatten().for_each(|v| v.to_bits().hash(&mut h));
-        (self.col, self.faded, self.opacity.to_bits(), self.on_gpu, shaded, edges, hidden_edges, edge_col, hidden_col).hash(&mut h);
+        (self.col, self.faded, self.opacity.to_bits(), self.on_gpu, shaded, edges, hidden_edges, on_top, edge_col, hidden_col).hash(&mut h);
         let mut looks: Vec<_> = self.face_looks.iter().map(|(f, l)| (*f, l.color, l.opacity.to_bits())).collect();
         looks.sort_unstable();
         looks.hash(&mut h);
         h.finish()
     }
 
-    fn build(&self, sc: &mut crate::gpu::BlockBytes, shaded: bool, edges: bool, hidden_edges: bool, edge_col: [u8; 4], hidden_col: [u8; 4]) {
+    fn build(&self, sc: &mut crate::gpu::BlockBytes, shaded: bool, edges: bool, hidden_edges: bool, on_top: bool, edge_col: [u8; 4], hidden_col: [u8; 4]) {
         let m = &self.mesh;
         let mut out = GpuScene::default();
         for (ti, t) in m.triangles.iter().enumerate().filter(|_| shaded && !self.on_gpu) {
@@ -668,7 +668,7 @@ impl BodyDraw {
             }
             for w in e.windows(2) {
                 let (a, b) = (at(w[0]), at(w[1]));
-                out.line(a, b, edge_col, 1.3, false);
+                out.line(a, b, edge_col, 1.3, on_top);
                 if hidden_edges {
                     out.hidden_line(a, b, hidden_col, 1.0);
                 }
@@ -679,6 +679,7 @@ impl BodyDraw {
         sc.glass.extend_from_slice(&out.glass);
         sc.lines.extend_from_slice(&out.lines);
         sc.hidden.extend_from_slice(&out.hidden);
+        sc.overlay.extend_from_slice(&out.overlay);
     }
 }
 
@@ -819,6 +820,10 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     // Shaded with hidden edges: edges behind the model show faintly.
     let hidden_edges = app.ui.visual_style == 3;
     let hidden_col = c4(tk.text.gamma_multiply(0.35));
+    // The glass is drawn after the lines, so an edge under it washes out to the body's own
+    // colour. Translucent sends its edges to the overlay pass instead: it draws after the
+    // glass and tests depth with Always, so every edge, front and back, keeps the model's ink.
+    let edges_on_top = app.ui.visual_style == TRANSLUCENT;
     // The blocks the last scene built, reused when their bodies come back as they were.
     let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
     let mut made: std::collections::HashMap<u64, CachedBlock> = std::collections::HashMap::new();
@@ -870,7 +875,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
             Some((mesh, place)) => BodyDraw { mesh, place: Some(place), col, faded, opacity, face_looks, on_gpu: true },
             None => BodyDraw { mesh: drawn_mesh(app, b), place: None, col, faded, opacity, face_looks, on_gpu },
         };
-        let key = body.key(shaded, edges, hidden_edges, edge_col, hidden_col);
+        let key = body.key(shaded, edges, hidden_edges, edges_on_top, edge_col, hidden_col);
         key.hash(&mut run_key);
         run.push(body);
         // Blocks end where a body's own key says, so a body added or removed changes only its
@@ -878,11 +883,11 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         if key.is_multiple_of(16) || run.len() >= 64 {
             let draws = std::mem::take(&mut run);
             let block_key = std::mem::replace(&mut run_key, std::collections::hash_map::DefaultHasher::new()).finish();
-            push_block(&mut sc, &mut kept, &mut made, block_key, draws, |d, out| d.build(out, shaded, edges, hidden_edges, edge_col, hidden_col));
+            push_block(&mut sc, &mut kept, &mut made, block_key, draws, |d, out| d.build(out, shaded, edges, hidden_edges, edges_on_top, edge_col, hidden_col));
         }
     }
     if !run.is_empty() {
-        push_block(&mut sc, &mut kept, &mut made, run_key.finish(), run, |d, out| d.build(out, shaded, edges, hidden_edges, edge_col, hidden_col));
+        push_block(&mut sc, &mut kept, &mut made, run_key.finish(), run, |d, out| d.build(out, shaded, edges, hidden_edges, edges_on_top, edge_col, hidden_col));
     }
     if let Ok(mut b) = app.viewport.blocks.lock() {
         *b = made;
