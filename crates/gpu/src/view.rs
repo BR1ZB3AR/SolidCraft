@@ -1445,6 +1445,8 @@ impl Renderer {
             })
         };
         let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
+        // Glass takes its own fragment entry: `fs_glass` adds the silhouettes that `solid`
+        // gives an opaque surface, so a curved face seen through the body keeps its shape.
         let glass = |label: &str, cull: wgpu::Face| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
@@ -1460,7 +1462,7 @@ impl Renderer {
                 multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
-                    entry_point: Some("fs_tri"),
+                    entry_point: Some("fs_glass"),
                     targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
                     compilation_options: Default::default(),
                 }),
@@ -1470,7 +1472,7 @@ impl Renderer {
         };
         // See-through instanced meshes: blended, depth tested, not written; `cull` for glass.
         let placed_see_through = [Some(shared_layout()), Some(instance_layout())];
-        let see_through = |label: &str, source: TriSource, cull: Option<wgpu::Face>| {
+        let see_through = |label: &str, source: TriSource, cull: Option<wgpu::Face>, fs: &str| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
@@ -1485,7 +1487,7 @@ impl Renderer {
                 multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
-                    entry_point: Some(&source.fragment("fs_tri")),
+                    entry_point: Some(&source.fragment(fs)),
                     targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
                     compilation_options: Default::default(),
                 }),
@@ -1493,12 +1495,13 @@ impl Renderer {
                 cache: None,
             })
         };
-        let both = |label: &str, cull: Option<wgpu::Face>| {
-            (see_through(label, TriSource::Instanced, cull), see_through(&format!("{label}_flat"), TriSource::InstancedFlat, cull))
+        let both = |label: &str, cull: Option<wgpu::Face>, fs: &str| {
+            (see_through(label, TriSource::Instanced, cull, fs), see_through(&format!("{label}_flat"), TriSource::InstancedFlat, cull, fs))
         };
-        let glass_far_instanced = both("sc_glass_far_instanced", Some(wgpu::Face::Front));
-        let glass_near_instanced = both("sc_glass_near_instanced", Some(wgpu::Face::Back));
-        let trans_instanced = both("sc_trans_instanced", None);
+        // Glass carries the silhouettes an opaque surface gets; `trans` (faded previews) does not.
+        let glass_far_instanced = both("sc_glass_far_instanced", Some(wgpu::Face::Front), "fs_glass");
+        let glass_near_instanced = both("sc_glass_near_instanced", Some(wgpu::Face::Back), "fs_glass");
+        let trans_instanced = both("sc_trans_instanced", None, "fs_tri");
         let image_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sc_image"),
             entries: &[
